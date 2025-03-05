@@ -1,10 +1,12 @@
-import io_tools
-import processing_tools
+import tools.io_tools as io_tools
+import tools.processing_tools as processing_tools
 import pandas as pd
 import os
 import numpy as np
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
+
+REF_DELAY = 5
 
 def import_FRAP_data(cziPath, wcell_corr= False):
     regions = io_tools.read_regions(cziPath)
@@ -30,7 +32,7 @@ def run_FRAP_analysis(roiData, frap_experiment, fitting_exp = 1):
     else:
         ref_roi = 'control_roi'
 
-    roiData, frap_experiment = processing_tools.photobleaching_corr(roiData, ref_roi , frap_experiment, delay = 10,exp=1)
+    roiData, frap_experiment = processing_tools.photobleaching_corr(roiData, ref_roi , frap_experiment, delay = REF_DELAY,exp=1)
 
     #roiData, frap_experiment = processing_tools.pre_bleach_normalization(roiData , frap_experiment)
 

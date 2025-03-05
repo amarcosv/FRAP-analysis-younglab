@@ -152,21 +152,22 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     print('[photobleaching_corr] Calculating photobleaching from imaging using ' + ref_roi + ' reference region')
     print('\tusing data from frame ' + str(frap_experiment.bleach_frame.item() + delay) + ' onwards (' + str(delay) + ' after roi bleaching)')
 
+    #Save the data used for bleaching corr as 'reference'
     roiData['reference'] = roiData[ref_roi].to_numpy()
    
-    # Use data from bleach timepoint+ delay to avoid including in the 
+    # Use data from bleach timepoint + delay to avoid including in the 
     # fitting timpoints showing a dip from recovery from photobleaching in the reference area
-    bleach_data = roiData[ref_roi].iloc[frap_experiment.bleach_frame.item() + delay::].to_numpy()
+    reference_data = roiData[ref_roi].iloc[frap_experiment.bleach_frame.item() + delay::].to_numpy()
     time_data = roiData['timestamp_frap'].iloc[frap_experiment.bleach_frame.item() + delay::].to_numpy()
   
     #Find fitting parameters for exponential function
-    photobleach_decay_params = fit_photobleaching_exp(time_data, bleach_data, exp)
+    photobleach_decay_params = fit_photobleaching_exp(time_data, reference_data, exp)
 
-    #Calculate  decay curve for entire experiment
+    #Extrapolate  decay curve for entire experiment
     photobleach_decay = estimate_exp_curve(roiData['timestamp_frap'], photobleach_decay_params, exp)
 
     #Calculate fitting error r_squared just for the timepoints used in the curve fitting step
-    r_squared = calculate_r_squared(bleach_data,  estimate_exp_curve(time_data, photobleach_decay_params, exp))
+    r_squared = calculate_r_squared(reference_data,  estimate_exp_curve(time_data, photobleach_decay_params, exp))
     
     print('Fit results:')    
 
@@ -183,10 +184,13 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
       
     print('\tFitting error (r2)= ' + str(r_squared))
 
+    #Extrapolated fitted decay curve
     roiData['reference_decay_curve'] = photobleach_decay
+    #Fitted decay curve with original prebleach data
     roiData['reference_synth'] = photobleach_decay
     roiData.loc[0:(frap_experiment.bleach_frame.item()-1),'reference_synth'] = roiData['reference'].iloc[0:(frap_experiment.bleach_frame.item())]
-  
+    
+    #Correct reference and bleach region data with extrapolated fitted curve normalized to bleach time point
     roiData['bleach_photo_corr'] = roiData['bleach'] / (photobleach_decay/photobleach_decay[frap_experiment.bleach_frame.item() ])
     roiData['reference_photo_corr'] =  roiData['reference'] / (photobleach_decay/photobleach_decay[frap_experiment.bleach_frame.item() ])
 
@@ -203,7 +207,8 @@ def run_normalization(roiData, frap_experiment):
     frap_experiment['post-reference'] = np.mean(roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
     frap_experiment['pre-bleach'] = np.mean(roiData['bleach'].iloc[0:frap_experiment.bleach_frame.item()-1])
     frap_experiment['post_bleach'] = roiData['bleach'].iloc[frap_experiment.bleach_frame.item()]
-    roiData['ref_norm'] = (frap_experiment['pre-reference'].iloc[0]/roiData['reference_synth'])
+    roiData['ref_norm'] = (roiData['reference_synth'] / roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
+    roiData['ref_norm_raw'] = roiData['reference'] / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
     #Double normalized curve (Prebleach set to 1)
     roiData['frap_norm'] = (frap_experiment['pre-reference'].iloc[0]/roiData['reference_synth']) \
          * (roiData['bleach']/frap_experiment['pre-bleach'].iloc[0])    
