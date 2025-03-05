@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 
-REF_DELAY = 5
+REF_DELAY = 10
 
 def import_FRAP_data(cziPath, wcell_corr= False):
     regions = io_tools.read_regions(cziPath)
@@ -36,7 +36,7 @@ def run_FRAP_analysis(roiData, frap_experiment, fitting_exp = 1):
 
     #roiData, frap_experiment = processing_tools.pre_bleach_normalization(roiData , frap_experiment)
 
-    roiData, frap_experiment = processing_tools.run_normalization(roiData , frap_experiment)
+    roiData, frap_experiment = processing_tools.run_double_normalization(roiData , frap_experiment)
 
     roiData, frap_experiment = processing_tools.fit_recovery_curve(roiData, frap_experiment, fitting_exp)
 

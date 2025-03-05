@@ -1,11 +1,11 @@
 import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit
-from skimage.morphology import disk
-from skimage.filters import rank, threshold_otsu, gaussian
+from skimage.morphology import disk, remove_small_holes
+from skimage.filters import rank, threshold_otsu, gaussian , threshold_triangle
+from skimage.measure import label
 
-
-
+AREA_THRESHOLD = 1000
 
 
 def process_ROI(imageData, frap_experiment, regionsInfo, frameInfo, do_bkg=False):
@@ -23,9 +23,27 @@ def process_ROI(imageData, frap_experiment, regionsInfo, frameInfo, do_bkg=False
     roiData['stage_y'] = frameInfo['Y[micron]']
     roiData['stage_z'] = frameInfo['Z[micron]']
 
-    #print(frap_experiment.wcell_corr.item())
+    roi_center = [0,0]
+    #Identify regions using metadata
+    for i,region in regionsInfo.iterrows():
+        
+        roi = imageData[:, int(regionsInfo.loc[i,'Y_roi']) : int(regionsInfo.loc[i,'Y_roi'] + regionsInfo.loc[i,'Height_roi']),
+               int(regionsInfo.loc[i,'X_roi']) : int(regionsInfo.loc[i,'X_roi'] + regionsInfo.loc[i,'Width_roi'])]
+
+        
+        roiMean = np.mean(roi, axis = (1,2))
+
+        if region['IsForBleach']:
+            roiData.loc[0:roiMean.size, ['bleach']] = roiMean
+            roi_center = [ int(regionsInfo.loc[i,'Y_roi'] + regionsInfo.loc[i,'Height_roi']/2),
+               int(regionsInfo.loc[i,'X_roi'] + (regionsInfo.loc[i,'Width_roi']/2))]           
+
+        else: 
+            roiData.loc[0:roiMean.size, ['control_roi']] = roiMean
+
+    #Perform cell segmentation and extract
     if frap_experiment.wcell_corr.item():
-        wcellMask = find_wcell_roi(imageData[0:frap_experiment.bleach_frame.item(),:,:])
+        wcellMask = find_wcell_roi(imageData[0:frap_experiment.bleach_frame.item(),:,:],roi_center)
         wcellMean = np.zeros(imageData.shape[0])
         for t in range(imageData.shape[0]):
             wcellMean[t] = np.mean(imageData[t,wcellMask])  
@@ -33,18 +51,6 @@ def process_ROI(imageData, frap_experiment, regionsInfo, frameInfo, do_bkg=False
         roiData['control_wcell'] = wcellMean
         frap_experiment['wcellMask'] = [wcellMask]
 
-    for i,region in regionsInfo.iterrows():
-        
-        roi = imageData[:, int(regionsInfo.loc[i,'Y_roi']) : int(regionsInfo.loc[i,'Y_roi'] + regionsInfo.loc[i,'Height_roi']),
-               int(regionsInfo.loc[i,'X_roi']) : int(regionsInfo.loc[i,'X_roi'] + regionsInfo.loc[i,'Width_roi'])]
-
-        roiMean = np.mean(roi, axis = (1,2))
-
-        if region['IsForBleach']:
-            roiData.loc[0:roiMean.size, ['bleach']] = roiMean           
-
-        else: 
-            roiData.loc[0:roiMean.size, ['control_roi']] = roiMean
 
     if do_bkg:
         p5 = np.percentile(imageData, 5)
@@ -53,7 +59,7 @@ def process_ROI(imageData, frap_experiment, regionsInfo, frameInfo, do_bkg=False
     return roiData, frap_experiment
 
 # segment cell shape from a stack of frames
-def find_wcell_roi(image):
+def find_wcell_roi(image, roi_center):
     
     Tmean = np.mean(image, axis = 0, dtype = np.uint16)
 
@@ -62,6 +68,12 @@ def find_wcell_roi(image):
 
     th = threshold_otsu(Tmean_f)
     mask =Tmean_f>th
+
+    mask  = remove_small_holes(mask, area_threshold = AREA_THRESHOLD)
+
+    label_image = label(mask)
+    cellID = label_image[roi_center[0],roi_center[1]]
+    mask = label_image ==cellID
 
     return mask
 # Double exponential model for photobleaching decay
@@ -202,22 +214,49 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     return roiData , frap_experiment    
 
 #Peform Double normalization
-def run_normalization(roiData, frap_experiment):
+def run_double_normalization(roiData, frap_experiment):
+    '''Normalized curves using a single or double normalization approach     
+    Calculated parameters:
+    pre-reference       : Average of reference for all frames before bleaching
+    pre-reference       : Value of fitted reference after bleaching (avoids dip)
+    pre-bleach          : Average of bleach roi for all frames before bleaching
+    post-bleach         : Value of bleach roi after bleaching
+    ref_norm            : Fitted curve of reference intensity normalized to intensity at bleaching event
+    ref_norm_raw        : Raw reference intensity normalized to average of frames before bleaching
+    frap_norm           : Double normalized curve
+    frap_fullscale_norm : Full scale normalized curve (bleach timepoint = 0)
+    gap_ratio           : For w_cell reference: Use avg 10 frames post bleach / avg pre bleach
+                        : for roi reference: Use extrapolated pre intensity / measured pre intensity    
+    const   : Amplitude of the constant offset. 
+    amp     : Amplitude of the exponential function
+    tau     : Time constant  in seconds.
+    '''
     frap_experiment['pre-reference'] = np.mean(roiData['reference_synth'].iloc[0:frap_experiment.bleach_frame.item()-1])
     frap_experiment['post-reference'] = np.mean(roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
     frap_experiment['pre-bleach'] = np.mean(roiData['bleach'].iloc[0:frap_experiment.bleach_frame.item()-1])
     frap_experiment['post_bleach'] = roiData['bleach'].iloc[frap_experiment.bleach_frame.item()]
+    
+    #Single normalization
     roiData['ref_norm'] = (roiData['reference_synth'] / roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
     roiData['ref_norm_raw'] = roiData['reference'] / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
+    
     #Double normalized curve (Prebleach set to 1)
     roiData['frap_norm'] = (frap_experiment['pre-reference'].iloc[0]/roiData['reference_synth']) \
          * (roiData['bleach']/frap_experiment['pre-bleach'].iloc[0])    
 
-    #Full scale normalization
+    #Full scale normalization (only use for diffusion coefficient calculation)
     roiData['frap_fullscale_norm'] = (roiData['frap_norm'] - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()]) / \
     (np.mean(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1])  - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] ) 
     
-    frap_experiment['gap_ratio'] = frap_experiment['post-reference'] / frap_experiment['pre-reference']
+    #Gap ratio calculation depends on choice of reference region
+    if frap_experiment.wcell_corr.item():        
+        frap_experiment['gap_ratio'] = np.mean(roiData['reference'].iloc[frap_experiment.bleach_frame.item():frap_experiment.bleach_frame.item()+10])  \
+        / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
+             
+    else:
+        frap_experiment['gap_ratio'] =  np.mean(roiData['reference_decay_curve'].iloc[0:frap_experiment.bleach_frame.item()-1]) \
+            / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
+    
 
     frap_experiment['bleach_depth'] = roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] 
 
@@ -266,13 +305,13 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
     else:
         inital_params = [max_sig/2, -max_sig/4, -max_sig/4, 1, 0.1]
         bounds = ([0,     -max_sig,   -max_sig,     0,   0],
-                [ max_sig,      0,            0,  100,   1])
+                [ max_sig,      0,            0,  1000,   1])
         bleach_recovery_params, parm_cov = curve_fit(double_exponential, time_data, bleach_data, 
                                   p0=inital_params, bounds=bounds, maxfev=1000)
         bleach_recovery = double_exponential(time_data, *bleach_recovery_params)
+
         r_squared = calculate_r_squared(bleach_data,  double_exponential(time_data,*bleach_recovery_params))
 
-    max_sig = np.max(bleach_data)
 
     print('Fit results:')    
 
@@ -295,17 +334,19 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
     frap_experiment['recovery_model'] = exp
     frap_experiment['recovery_fit'] = [bleach_recovery_params]
     frap_experiment['recovery_fit_r2'] = r_squared    
-    frap_experiment['mob'] = -bleach_recovery_params[1] / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] ))
-    frap_experiment['mob'] = (bleach_recovery[bleach_recovery.size-1] - bleach_recovery[0])/(1 - bleach_recovery[0])
-
-    frap_experiment['mob_corr'] = frap_experiment['mob'] / frap_experiment['gap_ratio']
+    #frap_experiment['mob'] = -bleach_recovery_params[1] / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] ))  
     if exp==1:
         frap_experiment['half_max'] = np.log(0.5)/-bleach_recovery_params[2]
-        #frap_experiment['mob'] = -bleach_recovery_params[1] / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] ))
+        frap_experiment['mob'] = -bleach_recovery_params[1] / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] ))
     else: 
         frap_experiment['half_max'] = [np.array([np.log(0.5)/-bleach_recovery_params[3], np.log(0.5)/-(bleach_recovery_params[3]*bleach_recovery_params[4])])]
-        #frap_experiment['mob'] = -(bleach_recovery_params[1]+bleach_recovery_params[2]) / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] + bleach_recovery_params[2]))
+        frap_experiment['mob'] = -(bleach_recovery_params[1]+bleach_recovery_params[2]) / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] + bleach_recovery_params[2]))
     
+    #frap_experiment['mob'] = (bleach_recovery[bleach_recovery.size-1] - bleach_recovery[0])/(1 - bleach_recovery[0])
+
+    frap_experiment['mob_corr'] = frap_experiment['mob'] / frap_experiment['gap_ratio']
+
+
     return roiData , frap_experiment    
 
 
