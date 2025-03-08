@@ -60,9 +60,15 @@ def load_image_data(cziPath):
         total_bounding_box = czidoc.total_bounding_box
         print('[load_image_data] Loading dataset with dimensions: ' + str(czidoc.total_bounding_box))
         #print(czidoc.total_bounding_box)
+
+        frame_limit = total_bounding_box["T"][1]
+        #frame_limit = int(frame_limit/2)
               
-        img_data = np.zeros((total_bounding_box["T"][1],total_bounding_box["Y"][1]  ,total_bounding_box["X"][1]))
-        for t in range(total_bounding_box["T"][1]):
+        img_data = np.zeros((frame_limit,total_bounding_box["Y"][1]  ,total_bounding_box["X"][1]))
+
+        
+
+        for t in range(frame_limit):
             
             # read a 2D image plane and optionally specify planes, zoom levels and ROIs
             img_data[t,:,:] = np.squeeze(czidoc.read(plane={"T": t}, zoom=1.0))
