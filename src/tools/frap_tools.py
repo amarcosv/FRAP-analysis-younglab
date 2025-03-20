@@ -107,15 +107,16 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
     nframes = dataset_frap_experiment['nframes'][0]
     dt= np.mean(dataset_frap_experiment['dt'])
 
-    dataset_roiData = rebin_results(dataset_roiData, dt ,bleach_frame , nframes )
+    #dataset_roiData = bin_results(dataset_roiData, dt ,bleach_frame , nframes )
 
     dataset_roiData = pd.concat(dataset_roiData, ignore_index=True)
+    dataset_roiData = bin_results(dataset_roiData, dt ,bleach_frame , nframes )
 
     #plt.close(fig)
 
     return dataset_roiData, dataset_frap_experiment, fig
 
-    
+#Resample time series to fixed time points 
 def rebin_results(dataset_roiData, dt, frap_frame, n):
 
     end = 0 + (n - 1) * dt
@@ -137,6 +138,27 @@ def rebin_results(dataset_roiData, dt, frap_frame, n):
         print(roiData['file'][0])
   
     return dataset_roiData
+
+#Assign timepoints to bins
+def bin_results(dataset_roiData, dt, frap_frame, n):
+
+    timestamps = dataset_roiData.groupby('timepoint')['timestamp_frap'].mean()
+    timepoints_std = dataset_roiData.groupby('timepoint')['timestamp_frap'].std()
+    #dataset_roiData['timestamp_frap_r'] = timestamps
+
+    # Dictionary for mapping
+    idx = np.linspace(0,n-1,n)
+    mapping_dict = pd.Series(timestamps,idx).to_dict()
+    dataset_roiData['timestamp_frap_r'] = dataset_roiData['timepoint'].map(mapping_dict)
+    dataset_roiData['timestamp_frap_res'] = dataset_roiData['timestamp_frap_r'] - dataset_roiData['timestamp_frap_r']
+    dataset_roiData['frap_norm_r'] = dataset_roiData['frap_norm'] 
+    dataset_roiData['frap_fullscale_norm_r'] = dataset_roiData['frap_fullscale_norm'] 
+  
+    return dataset_roiData
+
+
+
+
 
 def generate_preview(ax, image, regions, wcell_mask = None):
     

@@ -362,9 +362,9 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
 
 
     if exp==1:
-        inital_params = [y_o, A_o, tau_o]
-        bounds = ([0,       A_o*1.5,    0  ],
-                  [y_o*1.5,   0,        20])    
+        inital_params = [y_o,       A_o,        tau_o]
+        bounds =        ([0,        A_o*1.5,    0],
+                        [y_o*1.5,   0,          20])    
         bleach_recovery_params, parm_cov = curve_fit(single_exponential, time_data, bleach_data, 
                                   p0=inital_params, bounds = bounds,maxfev=10000, sigma = sigma, absolute_sigma=True)
         bleach_recovery = single_exponential(time_data, *bleach_recovery_params)
@@ -425,7 +425,8 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
 
     return roiData , frap_experiment    
 
-
+# Fit recovery for data from multiple experiments
+#def fit_envelop_recovery_curve(roiData, frap_experiment, exp=1):
 
 
 
