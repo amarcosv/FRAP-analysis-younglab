@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, fsolve
 from skimage.morphology import disk, remove_small_holes, erosion
 from skimage.filters import rank, threshold_otsu, gaussian , threshold_triangle, threshold_mean
 from skimage.measure import label
@@ -96,7 +96,7 @@ def find_wcell_roi(image, roi_center):
 
     return mask
 # Double exponential model for photobleaching decay
-def double_exponential(t, const, amp_slow, amp_fast, tau_fast, tau_multiplier):
+def double_exponential(t, const, amp_slow, amp_fast, tau_slow, tau_multiplier):
     '''Compute a double exponential function with constant offset. 
     Function contains a slow and a fast component in a linear combination. Fast component decay is expressed as times the slow component
     Parameters:
@@ -107,7 +107,7 @@ def double_exponential(t, const, amp_slow, amp_fast, tau_fast, tau_multiplier):
     tau_slow: Time constant of slow component in seconds.
     tau_factor: Time constant of fast component relative to slow. 
     '''
-    tau_slow = tau_fast*tau_multiplier
+    tau_fast = tau_slow*tau_multiplier
     return const + amp_slow*np.exp(-t*tau_slow) + amp_fast*np.exp(-t*tau_fast) 
 
 # Single exponential model for photobleaching decay
@@ -214,12 +214,16 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     # Initial guess for parameters
     y_o = np.mean(reference_data[-10:])
     A_o = np.mean(roiData[ref_roi].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy()) - y_o
-    tau_o = 0.05
+    A_o = np.mean(reference_data[0:5])- y_o
+    tau_o = 1
 
-    bounds = ([y_o/2, A_o-np.abs(A_o/2), 0 ],
-             [ y_o*2, A_o+np.abs(A_o/2), 10])
+    if(A_o<0):
+        A_o = 0.1
     print([y_o, A_o, tau_o])
-    print(bounds)
+    bounds = ([y_o*0.9,   0,    0 ],
+             [ y_o*1.1,   A_o * 1.5,    10])
+    #print([y_o, A_o, tau_o])
+    #print(bounds)
     #max_sig = np.max(reference_data)
     #bounds = ([0      , 0      , 0  ],
     #         [ max_sig, max_sig, 1000])
@@ -343,28 +347,26 @@ def pre_bleach_normalization(roiData, frap_experiment):
 
 # Fit recovery curve using a mono or bi-exponential model
 def fit_recovery_curve(roiData, frap_experiment, exp=1):
-    print('Fitting recovery model')
-
-    
+    print('Fitting recovery model')  
     
     #bleach_data = roiData['bleach_photo_corr_norm'].iloc[frap_experiment.bleach_frame.item()::]
     bleach_data = roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()::].astype(float).to_numpy()
     time_data = roiData['timestamp_frap'].iloc[frap_experiment.bleach_frame.item()::].to_numpy()
   
    
-    max_sig = np.max(bleach_data)
+    max_sig = np.mean(bleach_data[-5::])
     sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
 
     # Initial guess for parameters
-    y_o = 1
-    A_o = -0.5 
-    tau_o = 2
+    y_o = np.mean(bleach_data[-5::]) # when t = inf exp tends to y0
+    A_o = bleach_data[0] - y_o 
+    tau_o = 0.5
 
 
     if exp==1:
-        inital_params = [y_o,       A_o,        tau_o]
-        bounds =        ([0,        A_o*1.5,    0],
-                        [y_o*1.5,   0,          20])    
+        inital_params = [y_o,               A_o,        tau_o]
+        bounds =        ([y_o*0.9,   A_o*1.2,           0],
+                        [y_o*1.1,   A_o*0.8,            20])    
         bleach_recovery_params, parm_cov = curve_fit(single_exponential, time_data, bleach_data, 
                                   p0=inital_params, bounds = bounds,maxfev=10000, sigma = sigma, absolute_sigma=True)
         bleach_recovery = single_exponential(time_data, *bleach_recovery_params)
@@ -373,15 +375,17 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
         
    
     else:
-        inital_params = [y_o, A_o, A_o/2, tau_o, 0.1]
+        inital_params = [y_o,              A_o,        A_o/4,          tau_o,      10]
+        bounds =        ([y_o * 0.9,       A_o*1.1,    A_o*1.1,        0,          1],
+                        [y_o * 1.1,        A_o*0.6,          0,        20,         1000 ])  
         bleach_recovery_params, parm_cov = curve_fit(double_exponential, time_data, bleach_data, 
-                                  p0=inital_params,  sigma= sigma, absolute_sigma=True)
+                                  p0=inital_params,  bounds = bounds,sigma= sigma, absolute_sigma=True)
         bleach_recovery = double_exponential(time_data, *bleach_recovery_params)
         
         [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  double_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma)
 
 
-    print('Fit results:')    
+    print('Fit results:')       
 
     if exp==1:
         print('\toffset = '+ str(bleach_recovery_params[0]) + 
@@ -408,18 +412,26 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
     frap_experiment['recovery_fit_pval'] = p_val
 
     #frap_experiment['mob'] = -bleach_recovery_params[1] / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] ))  
+    #Half-max time calculation is for double normalized curve
     if exp==1:
-        frap_experiment['half_max'] = np.log(0.5)/-bleach_recovery_params[2]
+        frap_experiment['half_max'] = np.log(2)/bleach_recovery_params[2]
         frap_experiment['mob'] = -bleach_recovery_params[1] / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] ))
     else: 
-        frap_experiment['half_max'] = [np.array([np.log(0.5)/-bleach_recovery_params[3], np.log(0.5)/-(bleach_recovery_params[3]*bleach_recovery_params[4])])]
-        frap_experiment['half_max_slow'] = np.log(0.5)/-bleach_recovery_params[3]
-        frap_experiment['half_max_fast'] = np.log(0.5)/-(bleach_recovery_params[3]*bleach_recovery_params[4])
+        half_val = (2*bleach_recovery_params[0] + bleach_recovery_params[1] +bleach_recovery_params[2])/2
+            
+        
+        thalf=  fsolve(lambda t: double_exponential(t,bleach_recovery_params[0]-half_val,bleach_recovery_params[1],bleach_recovery_params[2],
+                                                    bleach_recovery_params[3],bleach_recovery_params[4]), 1, full_output=True,factor = 0.01)
+        
+        frap_experiment['half_max'] = thalf[0]
+        #frap_experiment['half_max'] = [np.array([np.log(0.5)/-bleach_recovery_params[3], np.log(0.5)/-(bleach_recovery_params[3]*bleach_recovery_params[4])])]
+        frap_experiment['half_max_slow'] = np.log(2)/bleach_recovery_params[3]
+        frap_experiment['half_max_fast'] = np.log(2)/(bleach_recovery_params[3]*bleach_recovery_params[4])
 
         frap_experiment['mob'] = -(bleach_recovery_params[1]+bleach_recovery_params[2]) / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] + bleach_recovery_params[2]))
     
-    #frap_experiment['mob'] = (bleach_recovery[bleach_recovery.size-1] - bleach_recovery[0])/(1 - bleach_recovery[0])
-
+    frap_experiment['mob_exp'] = (bleach_recovery[bleach_recovery.size-1] - bleach_recovery[0])/(1 - bleach_recovery[0])
+    frap_experiment['mob_exp_corr'] = frap_experiment['mob_exp'] / frap_experiment['gap_ratio']
     frap_experiment['mob_corr'] = frap_experiment['mob'] / frap_experiment['gap_ratio']
 
 
