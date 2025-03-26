@@ -29,18 +29,30 @@ def process_ROI(imageData, frap_experiment, regionsInfo, frameInfo, do_bkg=False
     roi_center = [0,0]
     #Identify regions using metadata
     for i,region in regionsInfo.iterrows():
+        #Check that ROI is not out of boundaries
+        y_o = int(regionsInfo.loc[i,'Y_roi']) 
+        y_1 = int(regionsInfo.loc[i,'Y_roi'] + regionsInfo.loc[i,'Height_roi'])
+        x_o = int(regionsInfo.loc[i,'X_roi'])
+        x_1  = int(regionsInfo.loc[i,'X_roi'] + regionsInfo.loc[i,'Width_roi'])
         
-        roi = imageData[:, int(regionsInfo.loc[i,'Y_roi']) : int(regionsInfo.loc[i,'Y_roi'] + regionsInfo.loc[i,'Height_roi']),
-               int(regionsInfo.loc[i,'X_roi']) : int(regionsInfo.loc[i,'X_roi'] + regionsInfo.loc[i,'Width_roi'])]
-
-        
+        if y_o < 0:
+            y_o = 0
+        if x_o < 0:
+            x_0 = 0
+        if y_1 >= imageData.shape[1]:
+            y_1 = int(imageData.shape[1] - 1) 
+        if x_1 >= imageData.shape[2]:
+            x_1 = int(imageData.shape[2] -1)             
+     
+        #Read ROI intensitites and calculate mean
+        roi = imageData[:, y_o : y_1, x_o : x_1]        
         roiMean = np.mean(roi, axis = (1,2))
 
+        #Check ROI Metadata
         if region['IsForBleach']:
             roiData.loc[0:roiMean.size, ['bleach']] = roiMean
             roi_center = [ int(regionsInfo.loc[i,'Y_roi'] + regionsInfo.loc[i,'Height_roi']/2),
-               int(regionsInfo.loc[i,'X_roi'] + (regionsInfo.loc[i,'Width_roi']/2))]           
-
+            int(regionsInfo.loc[i,'X_roi'] + (regionsInfo.loc[i,'Width_roi']/2))] 
         else: 
             roiData.loc[0:roiMean.size, ['control_roi']] = roiMean
 
