@@ -9,23 +9,32 @@ import matplotlib.pyplot as plt
 REF_DELAY = 20
 
 
-
 def import_FRAP_data(cziPath, wcell_corr= False):
-    regions = io_tools.read_regions(cziPath)
-    imageData = io_tools.load_image_data(cziPath)
-    frames_metadata = io_tools.load_frame_metadata(cziPath)
-    #time_diffs = np.diff(time_vector)
 
-    frap_experiment = pd.DataFrame([int(regions.loc[0,'bleach_frame'].item())], columns = ['bleach_frame']) 
-    frap_experiment['wcell_corr'] = wcell_corr       
-    #frap_experiment['bleach_frame'] = int(regions.loc[0,'bleach_frame'].item())
-           
-    roiData, frap_experiment = processing_tools.process_ROI(imageData,frap_experiment, regions, frames_metadata,False)
+    root, extension = os.path.splitext(cziPath)
 
+    if extension == '.czi':
+        regions = io_tools.read_regions(cziPath)
+        imageData = io_tools.load_image_data(cziPath)
+        frames_metadata = io_tools.load_frame_metadata(cziPath)
+        frap_experiment = pd.DataFrame([int(regions.loc[0,'bleach_frame'].item())], columns = ['bleach_frame']) 
+    
+        frap_experiment['wcell_corr'] = wcell_corr 
+            
+        roiData, frap_experiment = processing_tools.process_ROI(imageData,frap_experiment, regions, frames_metadata,False)
 
+        return roiData, frap_experiment, regions, imageData
 
+    elif extension == '.csv':
 
-    return roiData,regions, imageData, frap_experiment
+        roiData, bleach_frame = io_tools.read_zeiss_CSV(cziPath)
+        frap_experiment = pd.DataFrame({'bleach_frame':[bleach_frame],'wcell_corr' : [False]}) 
+        imageData = []
+        regions = []
+
+        return roiData, frap_experiment
+
+    
 
 def run_FRAP_analysis(roiData, frap_experiment, fitting_exp = 1):
 
