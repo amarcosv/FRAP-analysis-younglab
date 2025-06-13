@@ -182,6 +182,54 @@ def read_zeiss_CSV(csvPath):
 
 def parse_filename(filename):
     #DISHXX_PROT_CONDITION_ROI read from folder
+    filename, extension = os.path.splitext(filename)
+
+    dish_pattern = re.compile(r'dish(\d+)')
+    roi_pattern = re.compile(r'roi(\d+)')
+    dose_pattern = re.compile(r'(\w+)mM')
+
+    params = re.split('[_-]',filename)
+    dishN = ""
+    prot = "unknown"
+    roi = ""
+    group = "unknown"
+
+    for col in params:
+            match = dish_pattern.match(col)
+            if match:
+                dishN = match.group(1)
+                continue 
+            
+            match = roi_pattern.match(col)
+            if match:
+                roi = match.group(1)
+                continue
+            
+            match = dose_pattern.match(col)
+            if match:
+                dose = match.group(1)
+                continue    
+            
+            if "wt" in col.lower():
+                group = "WT" 
+                continue
+
+            if "mut" in col.lower():
+                group = col
+                continue 
+
+
+    print ("[parse_filename] Metadata retreived from filename: ")
+    print ("\tgroup = " + group)
+    print("\tdish = " + dishN )
+    print("\tProtein = " + prot )
+    print("\tROI  = " + roi )
+
+    return group, dishN, prot, roi
+
+def parse_filename_old(filename):
+    #DISHXX_PROT_CONDITION_ROI read from folder
+    filename, extension = os.path.splitext(filename)
 
     prefix = filename.split('Airyscan')
 
