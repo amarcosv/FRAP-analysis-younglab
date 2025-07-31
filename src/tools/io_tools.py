@@ -113,14 +113,20 @@ def read_zeiss_CSV(csvPath):
         print(f"An error occurred while reading the file: {e}")
         return None
     
+    #Read time units from csv to rescale in case of ms
+    tUnit = df.iloc[0,0] 
+    tScale = 1
+    if 'ms' in tUnit: 
+            tScale = 0.001
+
     df = df.drop(0)
     df = df.reset_index()
 
     roiData = pd.DataFrame()
-
+    
     # Read timestamp column column
-    if 'Time::Relative Time!!R' in df.columns:
-        roiData['timestamp'] = df['Time::Relative Time!!R'].copy().astype(float)
+    if 'Time::Relative Time!!R' in df.columns:        
+        roiData['timestamp'] = df['Time::Relative Time!!R'].copy().astype(float)*tScale
         #result_df['timestamp'] = result_df['timestamp'].astype(float)
     else:
         print("Error: 'Time::Relative Time!!R' column not found in the file.")
