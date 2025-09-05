@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 
-REF_DELAY = 20
+REF_DELAY = 3
 
 
 def import_FRAP_data(cziPath, wcell_corr= False):

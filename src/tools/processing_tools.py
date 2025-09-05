@@ -228,12 +228,16 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     sigma = np.std(roiData[ref_roi].iloc[0:(frap_experiment.bleach_frame.item()-1)].to_numpy())
 
     sigma = np.std(reference_data[-10:])
+
+    #igma =  reference_data/np.max(reference_data)
+    abs_sigma = True
+    #print(sigma)
     
     # Initial guess for parameters
     y_o = np.mean(reference_data[-10:])
     A_o = np.mean(roiData[ref_roi].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy()) - y_o
     A_o = np.mean(reference_data[0:5])- y_o
-    tau_o = 1
+    tau_o = 0.001
 
     if(A_o<0):
         A_o = 0.1
@@ -248,7 +252,7 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
    
     # Fit monoexponential decay curve
     photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
-                                  p0=[y_o, A_o, tau_o], bounds = bounds, sigma = sigma, absolute_sigma=True)
+                                  p0=[y_o, A_o, tau_o], bounds = bounds, sigma = sigma, absolute_sigma=abs_sigma)
 
 
     #Find fitting parameters for exponential function
