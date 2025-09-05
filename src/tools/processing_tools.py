@@ -364,7 +364,7 @@ def pre_bleach_normalization(roiData, frap_experiment):
 
 
 # Fit recovery curve using a mono or bi-exponential model
-def fit_recovery_curve(roiData, frap_experiment, exp=1):
+def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 1):
     print('Fitting recovery model')  
     
     #bleach_data = roiData['bleach_photo_corr_norm'].iloc[frap_experiment.bleach_frame.item()::]
@@ -373,7 +373,14 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
   
    
     max_sig = np.mean(bleach_data[-5::])
-    sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
+    
+    if wfit:
+        sigma = bleach_data / np.max(bleach_data)
+        abs_sigma = False
+    else:
+        sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
+        abs_sigma = True
+    #sigma =  (bleach_data-np.min(bleach_data))/(np.max(bleach_data)-np.min(bleach_data))
 
     # Initial guess for parameters
     y_o = np.mean(bleach_data[-5::]) # when t = inf exp tends to y0
@@ -386,7 +393,7 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
         bounds =        ([y_o*0.9,   A_o*1.2,           0],
                         [y_o*1.1,   A_o*0.8,            20])    
         bleach_recovery_params, parm_cov = curve_fit(single_exponential, time_data, bleach_data, 
-                                  p0=inital_params, bounds = bounds,maxfev=10000, sigma = sigma, absolute_sigma=True)
+                                  p0=inital_params, bounds = bounds,maxfev=10000, sigma = sigma, absolute_sigma=abs_sigma)
         bleach_recovery = single_exponential(time_data, *bleach_recovery_params)
 
         [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  single_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma)
@@ -397,7 +404,7 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1):
         bounds =        ([y_o * 0.9,       A_o*1.1,    A_o*1.1,        0,          1],
                         [y_o * 1.1,        A_o*0.6,          0,        20,         1000 ])  
         bleach_recovery_params, parm_cov = curve_fit(double_exponential, time_data, bleach_data, 
-                                  p0=inital_params,  bounds = bounds,sigma= sigma, absolute_sigma=True)
+                                  p0=inital_params,  bounds = bounds,sigma= sigma, absolute_sigma=abs_sigma)
         bleach_recovery = double_exponential(time_data, *bleach_recovery_params)
         
         [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  double_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma)
