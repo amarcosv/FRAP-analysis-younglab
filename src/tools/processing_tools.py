@@ -148,6 +148,7 @@ def calculate_fit_qc(data, fit_data, nparams, sigma):
     #sigma = np.std((data-fit_data)) 
 
     chisq = np.sum(((data-fit_data)/sigma)**2)
+ 
 
     r_chisq = chisq/degrees_of_freedom
     p_value = 1- chi2.cdf(chisq, degrees_of_freedom)
@@ -218,42 +219,56 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
 
     #Save the data used for bleaching corr as 'reference'
     roiData['reference'] = roiData[ref_roi].to_numpy()
-   
-   
-    # Use data from bleach timepoint + delay to avoid including in the 
-    # fitting timpoints showing a dip from recovery from photobleaching in the reference area
-    reference_data = roiData[ref_roi].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
-    time_data = roiData['timestamp_frap'].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
+    for delay in range(delay):
+        try:
+            # Use data from bleach timepoint + delay to avoid including in the 
+            # fitting timpoints showing a dip from recovery from photobleaching in the reference area
+            reference_data = roiData[ref_roi].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
+            time_data = roiData['timestamp_frap'].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
+            #print('load timestamp')
+            sigma = np.std(roiData[ref_roi].iloc[0:(frap_experiment.bleach_frame.item()-1)].to_numpy())
 
-    sigma = np.std(roiData[ref_roi].iloc[0:(frap_experiment.bleach_frame.item()-1)].to_numpy())
+            sigma = np.std(reference_data[-10:])
+            SNR = np.mean(reference_data[-10:])/sigma
+            print(SNR)
 
-    sigma = np.std(reference_data[-10:])
+            #igma =  reference_data/np.max(reference_data)
+            abs_sigma = True
+            #print(sigma)
+            
+            # Initial guess for parameters
+            y_o = np.mean(reference_data[-10:])
+            A_o = np.mean(roiData[ref_roi].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy()) - y_o
+            A_o = np.mean(reference_data[0:5])- y_o
+            
+            tau_o = 0.001
 
-    #igma =  reference_data/np.max(reference_data)
-    abs_sigma = True
-    #print(sigma)
-    
-    # Initial guess for parameters
-    y_o = np.mean(reference_data[-10:])
-    A_o = np.mean(roiData[ref_roi].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy()) - y_o
-    A_o = np.mean(reference_data[0:5])- y_o
-    tau_o = 0.001
+            if(A_o<0):
+                A_o = 0.1
+            #print([y_o, A_o, tau_o])
+            bounds = ([y_o*0.9,   0,    0 ],
+                    [ y_o*1.1,   A_o * 1.5,    10])
+            
+            print([y_o, A_o, tau_o])
+            #print(bounds)
+            #max_sig = np.max(reference_data)
+            #bounds = ([0      , 0      , 0  ],
+            #         [ max_sig, max_sig, 1000])
+        
+            # Fit monoexponential decay curve
+            
+            photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
+                                            p0=[y_o, A_o, tau_o],  sigma = sigma, absolute_sigma=abs_sigma,bounds = bounds)
+            break
+        #photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
+        #                              p0=[y_o, A_o, tau_o],  sigma = sigma, absolute_sigma=abs_sigma)
+        except:
+            
+            print('WARNING: fitting of photobleaching decay failed')
+            
+            print('\tAttempting fitting excluding first '+ str(delay) + ' samples')
 
-    if(A_o<0):
-        A_o = 0.1
-    print([y_o, A_o, tau_o])
-    bounds = ([y_o*0.9,   0,    0 ],
-             [ y_o*1.1,   A_o * 1.5,    10])
-    #print([y_o, A_o, tau_o])
-    #print(bounds)
-    #max_sig = np.max(reference_data)
-    #bounds = ([0      , 0      , 0  ],
-    #         [ max_sig, max_sig, 1000])
-   
-    # Fit monoexponential decay curve
-    photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
-                                  p0=[y_o, A_o, tau_o], bounds = bounds, sigma = sigma, absolute_sigma=abs_sigma)
-
+            #return roiData , frap_experiment    
 
     #Find fitting parameters for exponential function
     #photobleach_decay_params = fit_photobleaching_exp(time_data, reference_data, exp)
@@ -290,14 +305,14 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     #Correct reference and bleach region data with extrapolated fitted curve normalized to bleach time point
     roiData['bleach_photo_corr'] = roiData['bleach'] / (photobleach_decay/photobleach_decay[frap_experiment.bleach_frame.item() ])
     roiData['reference_photo_corr'] =  roiData['reference'] / (photobleach_decay/photobleach_decay[frap_experiment.bleach_frame.item() ])
-
+    frap_experiment['SNR'] = SNR
     frap_experiment['photobleach_fit'] = [photobleach_decay_params]
     frap_experiment['photobleach_fit_r2'] = r_squared
     frap_experiment['photobleach_fit_chi2'] = chi_squared
     frap_experiment['photobleach_fit_pval'] = p_val
     
 
-    frap_experiment
+    
 
     return roiData , frap_experiment    
 
@@ -368,23 +383,28 @@ def pre_bleach_normalization(roiData, frap_experiment):
 
 
 # Fit recovery curve using a mono or bi-exponential model
-def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 1):
+def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
     print('Fitting recovery model')  
     
     #bleach_data = roiData['bleach_photo_corr_norm'].iloc[frap_experiment.bleach_frame.item()::]
     bleach_data = roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()::].astype(float).to_numpy()
     time_data = roiData['timestamp_frap'].iloc[frap_experiment.bleach_frame.item()::].astype(float).to_numpy()
   
-   
+    #wfit=1
     max_sig = np.mean(bleach_data[-5::])
     
     if wfit:
+        sigma_bounds = [1,5]
         sigma = bleach_data / np.max(bleach_data)
-        abs_sigma = False
+        sigma = (bleach_data - np.min(bleach_data)) / (np.max(bleach_data) - np.min(bleach_data))
+        
+        sigma = (sigma_bounds[1]-sigma_bounds[0]) *sigma + sigma_bounds[0]
+        print(sigma)
+        abs_sigma = True
     else:
         sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
         abs_sigma = True
-    #sigma =  (bleach_data-np.min(bleach_data))/(np.max(bleach_data)-np.min(bleach_data))
+    sigma_QC = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
 
     # Initial guess for parameters
     y_o = np.mean(bleach_data[-5::]) # when t = inf exp tends to y0
@@ -400,7 +420,7 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 1):
                                   p0=inital_params, bounds = bounds,maxfev=10000, sigma = sigma, absolute_sigma=abs_sigma)
         bleach_recovery = single_exponential(time_data, *bleach_recovery_params)
 
-        [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  single_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma)
+        [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  single_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma_QC)
         
    
     else:

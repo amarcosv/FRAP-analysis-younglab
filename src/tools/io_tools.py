@@ -272,7 +272,9 @@ def parse_filename_old(filename):
 
 def saveResults(datasetPath, roiData, frap_experiment):
     OUTPUT_FOLDER, foldername = os.path.split(datasetPath)
-    basename = frap_experiment['protein'].iloc[0] + '_' + frap_experiment['group'].iloc[0] 
+    basename = frap_experiment['protein'].iloc[0] + '_' + frap_experiment['group'].iloc[0]
+    basename = frap_experiment['folder'].iloc[0]
+    #print(fname) 
     #print(fname)
 
     print("[saveResults] Saving results to file")
