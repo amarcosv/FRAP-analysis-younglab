@@ -246,8 +246,8 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
             if(A_o<0):
                 A_o = 0.1
             #print([y_o, A_o, tau_o])
-            bounds = ([y_o*0.9,   0,    0 ],
-                    [ y_o*1.1,   A_o * 1.5,    10])
+            bounds = ([y_o*0.9,   0,    1e-9 ],
+                    [ y_o*1.1,   A_o * 1.5,    2/time_data[-1]]) #With tau upper boundary we allow to drop e in half of the duration of the experiment
             
             print([y_o, A_o, tau_o])
             #print(bounds)
