@@ -121,14 +121,16 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
         dataset_frap_experiment.append(frap_experiment)
     
     dataset_frap_experiment = pd.concat(dataset_frap_experiment, ignore_index=True)
-    print(dataset_frap_experiment)
+    #print(dataset_frap_experiment)
     bleach_frame = dataset_frap_experiment['bleach_frame'][0]       
     nframes = dataset_frap_experiment['nframes'][0]
     dt= np.mean(dataset_frap_experiment['dt'])
 
-    #dataset_roiData = bin_results(dataset_roiData, dt ,bleach_frame , nframes )
-
+    # Rebin curves to common timepoints. Uses interpolation!
+    #dataset_roiData = rebin_results(dataset_roiData, dt ,bleach_frame , nframes )
     dataset_roiData = pd.concat(dataset_roiData, ignore_index=True)
+    
+    #Use instead of rebin results if timestamps are very precise and just want to rebin instead of using interpolation
     dataset_roiData = bin_results(dataset_roiData, dt ,bleach_frame , nframes )
 
     #plt.close(fig)
@@ -157,6 +159,12 @@ def rebin_results(dataset_roiData, dt, frap_frame, n):
         print(roiData['file'][0])
   
     return dataset_roiData
+
+
+
+
+
+
 
 #Assign timepoints to bins
 def bin_results(dataset_roiData, dt, frap_frame, n):

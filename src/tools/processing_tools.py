@@ -390,7 +390,7 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
     bleach_data = roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()::].astype(float).to_numpy()
     time_data = roiData['timestamp_frap'].iloc[frap_experiment.bleach_frame.item()::].astype(float).to_numpy()
   
-    #wfit=1
+    wfit=0
     max_sig = np.mean(bleach_data[-5::])
     
     if wfit:
@@ -399,7 +399,7 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
         sigma = (bleach_data - np.min(bleach_data)) / (np.max(bleach_data) - np.min(bleach_data))
         
         sigma = (sigma_bounds[1]-sigma_bounds[0]) *sigma + sigma_bounds[0]
-        print(sigma)
+        #print(sigma)
         abs_sigma = True
     else:
         sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
