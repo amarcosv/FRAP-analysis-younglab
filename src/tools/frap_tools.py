@@ -6,26 +6,37 @@ import numpy as np
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 
-REF_DELAY = 20
-
+REF_DELAY = 10
 
 
 def import_FRAP_data(cziPath, wcell_corr= False):
-    regions = io_tools.read_regions(cziPath)
-    imageData = io_tools.load_image_data(cziPath)
-    frames_metadata = io_tools.load_frame_metadata(cziPath)
-    #time_diffs = np.diff(time_vector)
 
-    frap_experiment = pd.DataFrame([int(regions.loc[0,'bleach_frame'].item())], columns = ['bleach_frame']) 
-    frap_experiment['wcell_corr'] = wcell_corr       
-    #frap_experiment['bleach_frame'] = int(regions.loc[0,'bleach_frame'].item())
-           
-    roiData, frap_experiment = processing_tools.process_ROI(imageData,frap_experiment, regions, frames_metadata,False)
+    root, extension = os.path.splitext(cziPath)
 
+    if extension == '.czi':
+        regions = io_tools.read_regions(cziPath)
+        imageData = io_tools.load_image_data(cziPath)
+        frames_metadata = io_tools.load_frame_metadata(cziPath)
+        frap_experiment = pd.DataFrame([int(regions.loc[0,'bleach_frame'].item())], columns = ['bleach_frame']) 
+    
+        frap_experiment['wcell_corr'] = wcell_corr 
+            
+        roiData, frap_experiment = processing_tools.process_ROI(imageData,frap_experiment, regions, frames_metadata,False)
 
+        return roiData, frap_experiment, regions, imageData
 
+    elif extension == '.csv':
 
-    return roiData,regions, imageData, frap_experiment
+        roiData, bleach_frame = io_tools.read_zeiss_CSV(cziPath)
+        frap_experiment = pd.DataFrame({'bleach_frame':[bleach_frame],'wcell_corr' : [False]})
+        frap_experiment['dt'] = np.mean(np.diff(roiData['timestamp'] [frap_experiment.bleach_frame.item()::]))
+        frap_experiment['nframes'] = len(roiData['timestamp'])  
+        imageData = []
+        regions = []
+
+        return roiData, frap_experiment, [],[]
+
+    
 
 def run_FRAP_analysis(roiData, frap_experiment, fitting_exp = 1):
 
@@ -50,10 +61,13 @@ def run_FRAP_analysis(roiData, frap_experiment, fitting_exp = 1):
 def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
     print('Processing files from directory: ' + folderPath)
 
-    fileList = [f for f in os.listdir(os.path.join(folderPath))  if f.endswith('.czi')]
-    basenames = [f.split('.czi')[0] for f in os.listdir(os.path.join(folderPath))  if f.endswith('.czi')]  
-
+    fileList = [f for f in os.listdir(os.path.join(folderPath))  if f.endswith(('.czi','.csv'))]
+    basenames = [os.path.splitext(f)[0] for f in os.listdir(os.path.join(folderPath))  if f.endswith(('.czi','.csv'))]  
+    
     #print(fileList)
+    do_preview = True
+    if '.csv' in fileList[0]:
+        do_preview = False 
 
     dataset_roiData = []
     dataset_frap_experiment = []
@@ -61,7 +75,9 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
     
  
     #plt.ioff()
-    fig, ax_previews = plt.subplots(nrows = int(np.ceil(len(fileList)/2)),ncols = 2, figsize=(12, 6*np.ceil(len(fileList)/2)))
+    fig = []
+    if do_preview:
+        fig, ax_previews = plt.subplots(nrows = int(np.ceil(len(fileList)/2)),ncols = 2, figsize=(12, 6*np.ceil(len(fileList)/2)))
 
 
     for idx,f in enumerate(fileList):
@@ -72,7 +88,7 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
  
 
 
-        roiData,regions, image, frap_experiment = import_FRAP_data(os.path.join(folderPath,f), wcell_corr= wcell_corr)
+        roiData,frap_experiment, regions, image,  = import_FRAP_data(os.path.join(folderPath,f), wcell_corr= wcell_corr)
         roiData, frap_experiment = run_FRAP_analysis(roiData, frap_experiment, fitting_exp)
 
         #if idx==0:
@@ -89,29 +105,32 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
         frap_experiment.insert(loc=2, column = 'dish', value = dish)
         frap_experiment.insert(loc=3, column = 'protein', value = prot)
         frap_experiment.insert(loc=4, column = 'roiN', value = roi)
-        #print(str(idx // 2) + "  " + str(idx % 2) )
-        if len(fileList) > 2:
-            ax = ax_previews[idx // 2, idx % 2]
-        else:
-            ax = ax_previews[idx]
-        if frap_experiment.wcell_corr.item():
-             generate_preview(ax, image, regions, frap_experiment['wcellMask'].values[0])
-        else: 
-             generate_preview(ax,image, regions)
-        ax.set_title(basenames[idx])
+        
+        if do_preview:
+            if len(fileList) > 2:
+                ax = ax_previews[idx // 2, idx % 2]
+            else:
+                ax = ax_previews[idx]
+            if frap_experiment.wcell_corr.item():
+                generate_preview(ax, image, regions, frap_experiment['wcellMask'].values[0])
+            else: 
+                generate_preview(ax,image, regions)
+            ax.set_title(basenames[idx])
         
         dataset_roiData.append(roiData)
         dataset_frap_experiment.append(frap_experiment)
     
     dataset_frap_experiment = pd.concat(dataset_frap_experiment, ignore_index=True)
-
+    #print(dataset_frap_experiment)
     bleach_frame = dataset_frap_experiment['bleach_frame'][0]       
     nframes = dataset_frap_experiment['nframes'][0]
     dt= np.mean(dataset_frap_experiment['dt'])
 
-    #dataset_roiData = bin_results(dataset_roiData, dt ,bleach_frame , nframes )
-
+    # Rebin curves to common timepoints. Uses interpolation!
+    #dataset_roiData = rebin_results(dataset_roiData, dt ,bleach_frame , nframes )
     dataset_roiData = pd.concat(dataset_roiData, ignore_index=True)
+    
+    #Use instead of rebin results if timestamps are very precise and just want to rebin instead of using interpolation
     dataset_roiData = bin_results(dataset_roiData, dt ,bleach_frame , nframes )
 
     #plt.close(fig)
@@ -140,6 +159,12 @@ def rebin_results(dataset_roiData, dt, frap_frame, n):
         print(roiData['file'][0])
   
     return dataset_roiData
+
+
+
+
+
+
 
 #Assign timepoints to bins
 def bin_results(dataset_roiData, dt, frap_frame, n):
