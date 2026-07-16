@@ -221,12 +221,13 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     roiData['reference'] = roiData[ref_roi].to_numpy()
     for delay in range(delay):
         try:
+
             # Use data from bleach timepoint + delay to avoid including in the 
             # fitting timpoints showing a dip from recovery from photobleaching in the reference area
             reference_data = roiData[ref_roi].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
             time_data = roiData['timestamp_frap'].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
             #print('load timestamp')
-            sigma = np.std(roiData[ref_roi].iloc[0:(frap_experiment.bleach_frame.item()-1)].to_numpy())
+            sigma = np.std(roiData[ref_roi].iloc[0:(frap_experiment.bleach_frame.item())].to_numpy())
 
             sigma = np.std(reference_data[-10:])
             SNR = np.mean(reference_data[-10:])/sigma
@@ -241,14 +242,14 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
             A_o = np.mean(roiData[ref_roi].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy()) - y_o
             A_o = np.mean(reference_data[0:5])- y_o
             
-            tau_o = 0.001
+            tau_o = 0.0000001
 
             if(A_o<0):
                 A_o = 0.1
             #print([y_o, A_o, tau_o])
-            bounds = ([y_o*0.9,   0,    1e-9 ],
+            bounds = ([y_o*0.9,   0,    1e-10 ],
                     [ y_o*1.1,   A_o * 1.5,    2/time_data[-1]]) #With tau upper boundary we allow to drop e in half of the duration of the experiment
-            
+            bounds = (0, [np.inf, np.inf, np.inf])
             print([y_o, A_o, tau_o])
             #print(bounds)
             #max_sig = np.max(reference_data)
@@ -258,7 +259,7 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
             # Fit monoexponential decay curve
             
             photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
-                                            p0=[y_o, A_o, tau_o],  sigma = sigma, absolute_sigma=abs_sigma,bounds = bounds)
+                                            p0=[y_o, A_o, tau_o],bounds = bounds)
             break
         #photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
         #                              p0=[y_o, A_o, tau_o],  sigma = sigma, absolute_sigma=abs_sigma)
@@ -274,6 +275,7 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     #photobleach_decay_params = fit_photobleaching_exp(time_data, reference_data, exp)
 
     #Extrapolate  decay curve for entire experiment
+    print(photobleach_decay_params)
     photobleach_decay = estimate_exp_curve(roiData['timestamp_frap'], photobleach_decay_params, exp)
 
     #Calculate fitting error r_squared and chi_sq just for the timepoints used in the curve fitting step
@@ -311,7 +313,7 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
     frap_experiment['photobleach_fit_chi2'] = chi_squared
     frap_experiment['photobleach_fit_pval'] = p_val
     
-
+ 
     
 
     return roiData , frap_experiment    
@@ -325,21 +327,23 @@ def run_double_normalization(roiData, frap_experiment):
     pre-bleach          : Average of bleach roi for all frames before bleaching
     post-bleach         : Value of bleach roi after bleaching
     ref_norm            : Fitted curve of reference intensity normalized to intensity at bleaching event
-    ref_norm_raw        : Raw reference intensity normalized to average of frames before bleaching
+    ref_norm_raw        : Raw reference intensity normalized to average intensity of frames before bleaching
     frap_norm           : Double normalized curve
     frap_fullscale_norm : Full scale normalized curve (bleach timepoint = 0)
     gap_ratio           : For w_cell reference: Use avg 10 frames post bleach / avg pre bleach
                         : for roi reference: Use extrapolated pre intensity / measured pre intensity    
     bleach_depth        : intensity from double normalized frap curve at bleach time (dip in 0-1 scale)
     '''
-    frap_experiment['pre-reference'] = np.mean(roiData['reference_synth'].iloc[0:frap_experiment.bleach_frame.item()-1])
+    #This function was modified for a csv where there is just 1 single frame before bleaching
+   
+    frap_experiment['pre-reference'] = np.mean(roiData['reference_synth'].iloc[0:frap_experiment.bleach_frame.item()])
     frap_experiment['post-reference'] = np.mean(roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
-    frap_experiment['pre-bleach'] = np.mean(roiData['bleach'].iloc[0:frap_experiment.bleach_frame.item()-1])
+    frap_experiment['pre-bleach'] = np.mean(roiData['bleach'].iloc[0:frap_experiment.bleach_frame.item()])
     frap_experiment['post_bleach'] = roiData['bleach'].iloc[frap_experiment.bleach_frame.item()]
     
     #Single normalization
     roiData['ref_norm'] = (roiData['reference_synth'] / roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
-    roiData['ref_norm_raw'] = roiData['reference'] / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
+    roiData['ref_norm_raw'] = roiData['reference'] / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()])
     
     #Double normalized curve (Prebleach set to 1)
     roiData['frap_norm'] = (frap_experiment['pre-reference'].iloc[0]/roiData['reference_synth'] ) \
@@ -347,17 +351,16 @@ def run_double_normalization(roiData, frap_experiment):
 
     #Full scale normalization (only use for diffusion coefficient calculation)
     roiData['frap_fullscale_norm'] = (roiData['frap_norm'] - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()]) / \
-    (np.mean(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1])  - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] ) 
+    (np.mean(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()])  - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] ) 
     
     #Gap ratio calculation depends on choice of reference region
     if frap_experiment.wcell_corr.item():        
         frap_experiment['gap_ratio'] = np.mean(roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item():frap_experiment.bleach_frame.item()+10])  \
-        / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
+        / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()])
              
     else:
-        frap_experiment['gap_ratio'] =  np.mean(roiData['reference_decay_curve'].iloc[0:frap_experiment.bleach_frame.item()-1]) \
-            / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
-    
+        frap_experiment['gap_ratio'] =  np.mean(roiData['reference_decay_curve'].iloc[0:frap_experiment.bleach_frame.item()]) \
+            / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()])
 
     frap_experiment['bleach_depth'] = roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] 
 
@@ -416,8 +419,11 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
         inital_params = [y_o,               A_o,        tau_o]
         bounds =        ([y_o*0.9,   A_o*1.2,           0],
                         [y_o*1.1,   A_o*0.8,            20])    
+        print(bounds)
+        print(inital_params)
+        print(sigma)    
         bleach_recovery_params, parm_cov = curve_fit(single_exponential, time_data, bleach_data, 
-                                  p0=inital_params, bounds = bounds,maxfev=10000, sigma = sigma, absolute_sigma=abs_sigma)
+                                  p0=inital_params, bounds = bounds,maxfev=10000)
         bleach_recovery = single_exponential(time_data, *bleach_recovery_params)
 
         [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  single_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma_QC)
