@@ -190,8 +190,8 @@ def parse_filename(filename):
     #DISHXX_PROT_CONDITION_ROI read from folder
     filename, extension = os.path.splitext(filename)
 
-    dish_pattern = re.compile(r'dish(\d+)')
-    roi_pattern = re.compile(r'roi(\d+)')
+    dish_pattern = re.compile(r'dish(\d+)', re.IGNORECASE)
+    roi_pattern = re.compile(r'roi(\d+)', re.IGNORECASE)
     dose_pattern = re.compile(r'(\w+)mM')
 
     params = re.split('[_-]',filename)
@@ -280,6 +280,8 @@ def saveResults(datasetPath, roiData, frap_experiment):
     print("[saveResults] Saving results to file")
     print("\tTimepoint data: " +  os.path.join(OUTPUT_FOLDER, basename +'_roiData'+ '.csv'))
     print("\tFRAP analysis summary: " +  os.path.join(OUTPUT_FOLDER, basename +'_frap_summary'+ '.csv'))
-
+    if not os.path.exists(OUTPUT_FOLDER):
+        print("[saveResults] Creating output directory " + OUTPUT_FOLDER)
+        os.makedirs(OUTPUT_FOLDER)
     roiData.to_csv( os.path.join(OUTPUT_FOLDER, basename +'_roiData'+ '.csv'))    
     frap_experiment.to_csv(  os.path.join(OUTPUT_FOLDER, basename +'_frap_summary'+ '.csv'))
