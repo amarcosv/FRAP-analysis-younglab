@@ -1,7 +1,8 @@
 #from czitools.metadata_tools.czi_metadata import CziMetadata, get_metadata_as_object,obj2dict
 from czitools.utils import misc
 from pylibCZIrw import czi as pyczi
-from aicsimageio import AICSImage
+from bioio import BioImage
+import bioio_czi
 import xml.etree.ElementTree as ET
 import pandas as pd
 from io import StringIO
@@ -12,7 +13,7 @@ import os
 
 def read_regions(cziPath):
 
-    czi = AICSImage(cziPath)
+    czi = BioImage(cziPath, reader=bioio_czi.Reader)
     md_xml = ET.tostring(czi.metadata ,encoding="unicode")
 
     #with pyczi.open_czi(cziPath) as czidoc:
