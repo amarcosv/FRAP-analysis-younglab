@@ -38,7 +38,7 @@ def process_ROI(imageData, frap_experiment, regionsInfo, frameInfo, do_bkg=False
         if y_o < 0:
             y_o = 0
         if x_o < 0:
-            x_0 = 0
+            x_o = 0
         if y_1 >= imageData.shape[1]:
             y_1 = int(imageData.shape[1] - 1) 
         if x_1 >= imageData.shape[2]:
@@ -58,7 +58,7 @@ def process_ROI(imageData, frap_experiment, regionsInfo, frameInfo, do_bkg=False
 
     #Perform cell segmentation and extract
     if frap_experiment.wcell_corr.item():
-        wcellMask = find_wcell_roi(imageData[0:frap_experiment.bleach_frame.item()-1,:,:],roi_center)
+        wcellMask = find_wcell_roi(imageData[0:frap_experiment.bleach_frame.item(),:,:],roi_center)
         #wcellMask = find_wcell_roi(imageData[-10:,:,:],roi_center)
         wcellMean = np.zeros(imageData.shape[0])
         for t in range(imageData.shape[0]):
@@ -212,21 +212,25 @@ def estimate_exp_curve(time, params, order):
 
 
 # Do photobleaching correction using a mono or bi-exponential model
-def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
+# delay_start: frames to always skip right after bleaching before the first fit attempt
+# delay: number of increasing offsets (starting at delay_start) to try if fitting fails
+def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, delay_start=0, exp=1):
 
     print('[photobleaching_corr] Calculating photobleaching from imaging using ' + ref_roi + ' reference region')
-    print('\tusing data from frame ' + str(frap_experiment.bleach_frame.item() + delay) + ' onwards (' + str(delay) + ' after roi bleaching)')
+    #print('\tusing data from frame ' + str(frap_experiment.bleach_frame.item() + delay) + ' onwards (' + str(delay) + ' after roi bleaching)')
 
     #Save the data used for bleaching corr as 'reference'
     roiData['reference'] = roiData[ref_roi].to_numpy()
-    for delay in range(delay):
+    for delay in range(delay_start, delay_start + delay):
         try:
+            print('\tusing data from frame ' + str(frap_experiment.bleach_frame.item() + delay) + ' onwards (' + str(delay) + ' after roi bleaching)')
+            
             # Use data from bleach timepoint + delay to avoid including in the 
             # fitting timpoints showing a dip from recovery from photobleaching in the reference area
             reference_data = roiData[ref_roi].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
             time_data = roiData['timestamp_frap'].iloc[(frap_experiment.bleach_frame.item() + delay)::].to_numpy()
             #print('load timestamp')
-            sigma = np.std(roiData[ref_roi].iloc[0:(frap_experiment.bleach_frame.item()-1)].to_numpy())
+            sigma = np.std(roiData[ref_roi].iloc[0:(frap_experiment.bleach_frame.item())].to_numpy())
 
             sigma = np.std(reference_data[-10:])
             SNR = np.mean(reference_data[-10:])/sigma
@@ -238,7 +242,7 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, exp=1):
             
             # Initial guess for parameters
             y_o = np.mean(reference_data[-10:])
-            A_o = np.mean(roiData[ref_roi].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy()) - y_o
+            A_o = np.mean(roiData[ref_roi].iloc[0:frap_experiment.bleach_frame.item()].to_numpy()) - y_o
             A_o = np.mean(reference_data[0:5])- y_o
             
             tau_o = 0.001
@@ -332,31 +336,31 @@ def run_double_normalization(roiData, frap_experiment):
                         : for roi reference: Use extrapolated pre intensity / measured pre intensity    
     bleach_depth        : intensity from double normalized frap curve at bleach time (dip in 0-1 scale)
     '''
-    frap_experiment['pre-reference'] = np.mean(roiData['reference_synth'].iloc[0:frap_experiment.bleach_frame.item()-1])
+    frap_experiment['pre-reference'] = np.mean(roiData['reference_synth'].iloc[0:frap_experiment.bleach_frame.item()])
     frap_experiment['post-reference'] = np.mean(roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
-    frap_experiment['pre-bleach'] = np.mean(roiData['bleach'].iloc[0:frap_experiment.bleach_frame.item()-1])
+    frap_experiment['pre-bleach'] = np.mean(roiData['bleach'].iloc[0:frap_experiment.bleach_frame.item()])
     frap_experiment['post_bleach'] = roiData['bleach'].iloc[frap_experiment.bleach_frame.item()]
-    
+
     #Single normalization
     roiData['ref_norm'] = (roiData['reference_synth'] / roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item()])
-    roiData['ref_norm_raw'] = roiData['reference'] / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
-    
+    roiData['ref_norm_raw'] = roiData['reference'] / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()])
+
     #Double normalized curve (Prebleach set to 1)
     roiData['frap_norm'] = (frap_experiment['pre-reference'].iloc[0]/roiData['reference_synth'] ) \
-         * (roiData['bleach'] /frap_experiment['pre-bleach'].iloc[0])   
+         * (roiData['bleach'] /frap_experiment['pre-bleach'].iloc[0])
 
     #Full scale normalization (only use for diffusion coefficient calculation)
     roiData['frap_fullscale_norm'] = (roiData['frap_norm'] - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()]) / \
-    (np.mean(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1])  - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] ) 
-    
+    (np.mean(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()])  - roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] )
+
     #Gap ratio calculation depends on choice of reference region
-    if frap_experiment.wcell_corr.item():        
+    if frap_experiment.wcell_corr.item():
         frap_experiment['gap_ratio'] = np.mean(roiData['reference_synth'].iloc[frap_experiment.bleach_frame.item():frap_experiment.bleach_frame.item()+10])  \
-        / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
-             
+        / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()])
+
     else:
-        frap_experiment['gap_ratio'] =  np.mean(roiData['reference_decay_curve'].iloc[0:frap_experiment.bleach_frame.item()-1]) \
-            / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()-1])
+        frap_experiment['gap_ratio'] =  np.mean(roiData['reference_decay_curve'].iloc[0:frap_experiment.bleach_frame.item()]) \
+            / np.mean(roiData['reference'].iloc[0:frap_experiment.bleach_frame.item()])
     
 
     frap_experiment['bleach_depth'] = roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()] 
@@ -390,7 +394,6 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
     bleach_data = roiData['frap_norm'].iloc[frap_experiment.bleach_frame.item()::].astype(float).to_numpy()
     time_data = roiData['timestamp_frap'].iloc[frap_experiment.bleach_frame.item()::].astype(float).to_numpy()
   
-    wfit=0
     max_sig = np.mean(bleach_data[-5::])
     
     if wfit:
@@ -402,9 +405,9 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
         #print(sigma)
         abs_sigma = True
     else:
-        sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
+        sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()].to_numpy())
         abs_sigma = True
-    sigma_QC = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()-1].to_numpy())
+    sigma_QC = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()].to_numpy())
 
     # Initial guess for parameters
     y_o = np.mean(bleach_data[-5::]) # when t = inf exp tends to y0
