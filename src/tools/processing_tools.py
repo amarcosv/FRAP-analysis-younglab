@@ -5,7 +5,6 @@ from scipy.optimize import curve_fit, fsolve
 from skimage.morphology import disk, remove_small_holes, erosion
 from skimage.filters import rank, threshold_otsu, gaussian , threshold_triangle, threshold_mean
 from skimage.measure import label
-from scipy.stats import chi2
 from scipy.stats import chisquare
 
 AREA_THRESHOLD = 5000
@@ -105,6 +104,9 @@ def find_wcell_roi(image, roi_center):
         label_image = label(mask)
         cellID = label_image[roi_center[0],roi_center[1]]
 
+    if cellID == 0:
+        raise RuntimeError('[find_wcell_roi] Could not segment a whole-cell region at the bleach ROI center after retrying with a second threshold method')
+
     mask = label_image ==cellID
 
     return mask
@@ -137,38 +139,18 @@ def single_exponential(t, const, amp, tau):
     return const + amp*np.exp(-tau*t) 
 
 # Calculate R-square value of the fit
-def calculate_fit_qc(data, fit_data, nparams, sigma):
-    
-    
-    #Chi squared p-value
-    degrees_of_freedom = len(data) - nparams
+def calculate_fit_qc(data, fit_data):
 
-    sigma = np.ones_like(data) * sigma
-
-    #sigma = np.std((data-fit_data)) 
-
-    chisq = np.sum(((data-fit_data)/sigma)**2)
- 
-
-    r_chisq = chisq/degrees_of_freedom
-    p_value = 1- chi2.cdf(chisq, degrees_of_freedom)
-    #r_chisq, p_value = chisquare(data, fit_data, ddof=degrees_of_freedom)
-    #chisq, p_value = chisquare(data, f_exp =  fit_data, ddof=nparams, sum_check= True)
-   
-    #y_errors = np.ones_like(data) * sigma
-    #reduced_chi2, chi2_val = reduced_chi_squared(y_data, y_fitted, y_errors, degrees_of_freedom)
-    #p_value = chi_squared_p_value(chi2_val, degrees_of_freedom)
-    
     # residual sum of squares
     ss_res = np.sum((data - fit_data) ** 2)
 
     # total sum of squares
     ss_tot = np.sum((data - np.mean(data)) ** 2)
 
-    # r-squared 
+    # r-squared
     r2 = 1 - (ss_res / ss_tot)
 
-    return r2, r_chisq, p_value
+    return r2
 
 #Find curve parameters for a decaying exponential curve
 def fit_photobleaching_exp(time, data, order):
@@ -221,7 +203,9 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, delay_start=
 
     #Save the data used for bleaching corr as 'reference'
     roiData['reference'] = roiData[ref_roi].to_numpy()
-    for delay in range(delay_start, delay_start + delay):
+    photobleach_decay_params = None
+    delays_tried = range(delay_start, delay_start + delay)
+    for delay in delays_tried:
         try:
             print('\tusing data from frame ' + str(frap_experiment.bleach_frame.item() + delay) + ' onwards (' + str(delay) + ' after roi bleaching)')
             
@@ -264,15 +248,19 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, delay_start=
             photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
                                             p0=[y_o, A_o, tau_o],  sigma = sigma, absolute_sigma=abs_sigma,bounds = bounds)
             break
-        #photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data, 
+        #photobleach_decay_params, parm_cov = curve_fit(single_exponential, time_data, reference_data,
         #                              p0=[y_o, A_o, tau_o],  sigma = sigma, absolute_sigma=abs_sigma)
-        except:
-            
-            print('WARNING: fitting of photobleaching decay failed')
-            
+        except (RuntimeError, ValueError) as e:
+
+            print('WARNING: fitting of photobleaching decay failed (' + str(e) + ')')
+
             print('\tAttempting fitting excluding first '+ str(delay) + ' samples')
 
-            #return roiData , frap_experiment    
+            #return roiData , frap_experiment
+
+    if photobleach_decay_params is None:
+        raise RuntimeError('[photobleaching_corr] Could not fit photobleaching decay for "' + ref_roi +
+                            '" with delay offsets ' + str(list(delays_tried)))
 
     #Find fitting parameters for exponential function
     #photobleach_decay_params = fit_photobleaching_exp(time_data, reference_data, exp)
@@ -280,8 +268,8 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, delay_start=
     #Extrapolate  decay curve for entire experiment
     photobleach_decay = estimate_exp_curve(roiData['timestamp_frap'], photobleach_decay_params, exp)
 
-    #Calculate fitting error r_squared and chi_sq just for the timepoints used in the curve fitting step
-    [r_squared, chi_squared, p_val] = calculate_fit_qc(reference_data,  estimate_exp_curve(time_data, photobleach_decay_params, 1), len(photobleach_decay_params), sigma)
+    #Calculate fitting error r_squared just for the timepoints used in the curve fitting step
+    r_squared = calculate_fit_qc(reference_data,  estimate_exp_curve(time_data, photobleach_decay_params, 1))
     
     print('Fit results:')    
 
@@ -297,23 +285,19 @@ def photobleaching_corr(roiData, ref_roi, frap_experiment, delay=3, delay_start=
           '\n\ttau_fast: ' + str(photobleach_decay_params[4] * photobleach_decay_params[3])) 
       
     print('\tFitting error (r2)= ' + str(r_squared))
-    print('\tFitting goodness (chi2)= ' + str(chi_squared))
-    #print('\tFitting significance (p-value)= ' + str(p_val))
 
     #Extrapolated fitted decay curve
     roiData['reference_decay_curve'] = photobleach_decay
     #Fitted decay curve with original prebleach data
     roiData['reference_synth'] = photobleach_decay
     roiData.loc[0:(frap_experiment.bleach_frame.item()-1),'reference_synth'] = roiData['reference'].iloc[0:(frap_experiment.bleach_frame.item())]
-    
+
     #Correct reference and bleach region data with extrapolated fitted curve normalized to bleach time point
     roiData['bleach_photo_corr'] = roiData['bleach'] / (photobleach_decay/photobleach_decay[frap_experiment.bleach_frame.item() ])
     roiData['reference_photo_corr'] =  roiData['reference'] / (photobleach_decay/photobleach_decay[frap_experiment.bleach_frame.item() ])
     frap_experiment['SNR'] = SNR
     frap_experiment['photobleach_fit'] = [photobleach_decay_params]
     frap_experiment['photobleach_fit_r2'] = r_squared
-    frap_experiment['photobleach_fit_chi2'] = chi_squared
-    frap_experiment['photobleach_fit_pval'] = p_val
     
 
     
@@ -407,7 +391,6 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
     else:
         sigma = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()].to_numpy())
         abs_sigma = True
-    sigma_QC = np.std(roiData['frap_norm'].iloc[0:frap_experiment.bleach_frame.item()].to_numpy())
 
     # Initial guess for parameters
     y_o = np.mean(bleach_data[-5::]) # when t = inf exp tends to y0
@@ -423,18 +406,18 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
                                   p0=inital_params, bounds = bounds,maxfev=10000, sigma = sigma, absolute_sigma=abs_sigma)
         bleach_recovery = single_exponential(time_data, *bleach_recovery_params)
 
-        [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  single_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma_QC)
-        
-   
+        r_squared = calculate_fit_qc(bleach_data,  single_exponential(time_data,*bleach_recovery_params))
+
+
     else:
         inital_params = [y_o,              A_o,        A_o/4,          tau_o,      10]
         bounds =        ([y_o * 0.9,       A_o*1.1,    A_o*1.1,        0,          1],
-                        [y_o * 1.1,        A_o*0.6,          0,        20,         1000 ])  
-        bleach_recovery_params, parm_cov = curve_fit(double_exponential, time_data, bleach_data, 
+                        [y_o * 1.1,        A_o*0.6,          0,        20,         1000 ])
+        bleach_recovery_params, parm_cov = curve_fit(double_exponential, time_data, bleach_data,
                                   p0=inital_params,  bounds = bounds,sigma= sigma, absolute_sigma=abs_sigma)
         bleach_recovery = double_exponential(time_data, *bleach_recovery_params)
-        
-        [r_squared, chi_squared, p_val] = calculate_fit_qc(bleach_data,  double_exponential(time_data,*bleach_recovery_params), len(bleach_recovery_params), sigma)
+
+        r_squared = calculate_fit_qc(bleach_data,  double_exponential(time_data,*bleach_recovery_params))
 
 
     print('Fit results:')       
@@ -451,8 +434,6 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
           '\n\ttau_fast: ' + str(bleach_recovery_params[4] * bleach_recovery_params[3])) 
     
     print('\tFitting error (r2)= ' + str(r_squared))
-    print('\tFitting goodness (chi2)= ' + str(chi_squared))
-    #print('\tFitting significance (p-value)= ' + str(p_val))
 
     roiData.loc[frap_experiment.bleach_frame.item()::,'bleach_recovery_curve'] = bleach_recovery
     roiData.loc[0:frap_experiment.bleach_frame.item()-1,'bleach_recovery_curve'] = 1
@@ -460,8 +441,6 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
     frap_experiment['recovery_model'] = exp
     frap_experiment['recovery_fit'] = [bleach_recovery_params]
     frap_experiment['recovery_fit_r2'] = r_squared
-    frap_experiment['recovery_fit_chi2'] = chi_squared
-    frap_experiment['recovery_fit_pval'] = p_val
 
     #frap_experiment['mob'] = -bleach_recovery_params[1] / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] ))  
     #Half-max time calculation is for double normalized curve
@@ -475,13 +454,18 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
         thalf=  fsolve(lambda t: double_exponential(t,bleach_recovery_params[0]-half_val,bleach_recovery_params[1],bleach_recovery_params[2],
                                                     bleach_recovery_params[3],bleach_recovery_params[4]), 1, full_output=True,factor = 0.01)
         
-        frap_experiment['half_max'] = thalf[0]
+        if thalf[2] != 1:
+            print('WARNING: half-max time solver did not converge (' + thalf[3] + ')')
+            frap_experiment['half_max'] = np.nan
+        else:
+            frap_experiment['half_max'] = thalf[0]
         #frap_experiment['half_max'] = [np.array([np.log(0.5)/-bleach_recovery_params[3], np.log(0.5)/-(bleach_recovery_params[3]*bleach_recovery_params[4])])]
         frap_experiment['half_max_slow'] = np.log(2)/bleach_recovery_params[3]
         frap_experiment['half_max_fast'] = np.log(2)/(bleach_recovery_params[3]*bleach_recovery_params[4])
 
         frap_experiment['mob'] = -(bleach_recovery_params[1]+bleach_recovery_params[2]) / (1-(bleach_recovery_params[0] + bleach_recovery_params[1] + bleach_recovery_params[2]))
-    
+
+    #Direct calcualtion from raw datapoints. Use carefully
     frap_experiment['mob_exp'] = (bleach_recovery[bleach_recovery.size-1] - bleach_recovery[0])/(1 - bleach_recovery[0])
     frap_experiment['mob_exp_corr'] = frap_experiment['mob_exp'] / frap_experiment['gap_ratio']
     frap_experiment['mob_corr'] = frap_experiment['mob'] / frap_experiment['gap_ratio']

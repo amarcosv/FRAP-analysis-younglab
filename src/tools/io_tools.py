@@ -197,42 +197,42 @@ def parse_filename(filename):
 
     params = re.split('[_-]',filename)
     dishN = ""
-    prot = "unknown"
     roi = ""
     group = "unknown"
+    dose = ""
 
     for col in params:
             match = dish_pattern.match(col)
             if match:
                 dishN = match.group(1)
-                continue 
-            
+                continue
+
             match = roi_pattern.match(col)
             if match:
                 roi = match.group(1)
                 continue
-            
+
             match = dose_pattern.match(col)
             if match:
                 dose = match.group(1)
-                continue    
-            
+                continue
+
             if "wt" in col.lower():
-                group = "WT" 
+                group = "WT"
                 continue
 
             if "mut" in col.lower():
                 group = col
-                continue 
+                continue
 
 
     print ("[parse_filename] Metadata retreived from filename: ")
     print ("\tgroup = " + group)
     print("\tdish = " + dishN )
-    print("\tProtein = " + prot )
     print("\tROI  = " + roi )
+    print("\tDose = " + dose )
 
-    return group, dishN, prot, roi
+    return group, dishN, roi, dose
 
 def parse_filename_old(filename):
     #DISHXX_PROT_CONDITION_ROI read from folder
@@ -273,10 +273,7 @@ def parse_filename_old(filename):
 
 def saveResults(datasetPath, roiData, frap_experiment):
     OUTPUT_FOLDER, foldername = os.path.split(datasetPath)
-    basename = frap_experiment['protein'].iloc[0] + '_' + frap_experiment['group'].iloc[0]
     basename = frap_experiment['folder'].iloc[0]
-    #print(fname) 
-    #print(fname)
 
     print("[saveResults] Saving results to file")
     print("\tTimepoint data: " +  os.path.join(OUTPUT_FOLDER, basename +'_roiData'+ '.csv'))
@@ -284,5 +281,15 @@ def saveResults(datasetPath, roiData, frap_experiment):
     if not os.path.exists(OUTPUT_FOLDER):
         print("[saveResults] Creating output directory " + OUTPUT_FOLDER)
         os.makedirs(OUTPUT_FOLDER)
-    roiData.to_csv( os.path.join(OUTPUT_FOLDER, basename +'_roiData'+ '.csv'))    
+    roiData.to_csv( os.path.join(OUTPUT_FOLDER, basename +'_roiData'+ '.csv'))
     frap_experiment.to_csv(  os.path.join(OUTPUT_FOLDER, basename +'_frap_summary'+ '.csv'))
+
+def save_failed_files(datasetPath, failures):
+    if not failures:
+        return
+    OUTPUT_FOLDER, foldername = os.path.split(datasetPath)
+    if not os.path.exists(OUTPUT_FOLDER):
+        os.makedirs(OUTPUT_FOLDER)
+    failed_files_path = os.path.join(OUTPUT_FOLDER, foldername + '_failed_files.csv')
+    pd.DataFrame(failures).to_csv(failed_files_path, index=False)
+    print('[save_failed_files] ' + str(len(failures)) + ' file(s) failed - see ' + failed_files_path)

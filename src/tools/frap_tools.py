@@ -58,22 +58,23 @@ def run_FRAP_analysis(roiData, frap_experiment, fitting_exp = 1):
 #def perform_photobleaching_correction(roiData, frap_experiment, delay = 3, exp=1, use_wcell = True):
 
 
-def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
+def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1, output_path=None):
     print('Processing files from directory: ' + folderPath)
 
     fileList = [f for f in os.listdir(os.path.join(folderPath))  if f.endswith(('.czi','.csv'))]
-    basenames = [os.path.splitext(f)[0] for f in os.listdir(os.path.join(folderPath))  if f.endswith(('.czi','.csv'))]  
-    
+    basenames = [os.path.splitext(f)[0] for f in os.listdir(os.path.join(folderPath))  if f.endswith(('.czi','.csv'))]
+
     #print(fileList)
     do_preview = True
     if '.csv' in fileList[0]:
-        do_preview = False 
+        do_preview = False
 
     dataset_roiData = []
     dataset_frap_experiment = []
-    
-    
- 
+    failures = []
+
+
+
     #plt.ioff()
     fig = []
     if do_preview:
@@ -84,42 +85,55 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1):
         print('\n[processFiles] processing file ' + str(idx+1) + ' of ' +str(len(fileList)))
         print('[processFiles] Filename = ' + f)
 
-        group, dish, prot, roi = io_tools.parse_filename(f)
- 
+        try:
+            group, dish, roi, dose = io_tools.parse_filename(f)
 
 
-        roiData,frap_experiment, regions, image,  = import_FRAP_data(os.path.join(folderPath,f), wcell_corr= wcell_corr)
-        roiData, frap_experiment = run_FRAP_analysis(roiData, frap_experiment, fitting_exp)
 
-        #if idx==0:
-            #imageData = np.zeros([len(fileList),image.shape[0], image.shape[1]])
+            roiData,frap_experiment, regions, image,  = import_FRAP_data(os.path.join(folderPath,f), wcell_corr= wcell_corr)
+            roiData, frap_experiment = run_FRAP_analysis(roiData, frap_experiment, fitting_exp)
 
-        #imageData[idx,:,:] = image
-        roiData.insert(loc=0, column = 'file', value = basenames[idx])
-        roiData.insert(loc=1, column = 'group', value = group)
-        roiData.insert(loc=2, column = 'dish', value = dish)
-        roiData.insert(loc=3, column = 'protein', value = prot)
-        roiData.insert(loc=4, column = 'roiN', value = roi)        
-        frap_experiment.insert(loc=0, column = 'file', value = basenames[idx])
-        frap_experiment.insert(loc=1, column = 'group', value = group)
-        frap_experiment.insert(loc=2, column = 'dish', value = dish)
-        frap_experiment.insert(loc=3, column = 'protein', value = prot)
-        frap_experiment.insert(loc=4, column = 'roiN', value = roi)
-        
-        if do_preview:
-            if len(fileList) > 2:
-                ax = ax_previews[idx // 2, idx % 2]
-            else:
-                ax = ax_previews[idx]
-            if frap_experiment.wcell_corr.item():
-                generate_preview(ax, image, regions, frap_experiment['wcellMask'].values[0])
-            else: 
-                generate_preview(ax,image, regions)
-            ax.set_title(basenames[idx])
-        
-        dataset_roiData.append(roiData)
-        dataset_frap_experiment.append(frap_experiment)
-    
+            #if idx==0:
+                #imageData = np.zeros([len(fileList),image.shape[0], image.shape[1]])
+
+            #imageData[idx,:,:] = image
+            roiData.insert(loc=0, column = 'file', value = basenames[idx])
+            roiData.insert(loc=1, column = 'group', value = group)
+            roiData.insert(loc=2, column = 'dish', value = dish)
+            roiData.insert(loc=3, column = 'dose', value = dose)
+            roiData.insert(loc=4, column = 'roiN', value = roi)
+            frap_experiment.insert(loc=0, column = 'file', value = basenames[idx])
+            frap_experiment.insert(loc=1, column = 'group', value = group)
+            frap_experiment.insert(loc=2, column = 'dish', value = dish)
+            frap_experiment.insert(loc=3, column = 'dose', value = dose)
+            frap_experiment.insert(loc=4, column = 'roiN', value = roi)
+
+            if do_preview:
+                if len(fileList) > 2:
+                    ax = ax_previews[idx // 2, idx % 2]
+                else:
+                    ax = ax_previews[idx]
+                if frap_experiment.wcell_corr.item():
+                    generate_preview(ax, image, regions, frap_experiment['wcellMask'].values[0])
+                else:
+                    generate_preview(ax,image, regions)
+                ax.set_title(basenames[idx])
+
+            dataset_roiData.append(roiData)
+            dataset_frap_experiment.append(frap_experiment)
+        except Exception as e:
+            print('WARNING: [processFiles] Failed to process file ' + f + ': ' + str(e))
+            failures.append({'file': basenames[idx], 'error': str(e)})
+            continue
+
+    if not dataset_roiData:
+        raise RuntimeError('[process_FRAP_folder] All ' + str(len(fileList)) + ' file(s) in ' + folderPath + ' failed to process')
+
+    if output_path is not None:
+        io_tools.save_failed_files(os.path.join(output_path, os.path.basename(folderPath)), failures)
+    elif failures:
+        print('[process_FRAP_folder] ' + str(len(failures)) + ' file(s) failed - see warnings above')
+
     dataset_frap_experiment = pd.concat(dataset_frap_experiment, ignore_index=True)
     #print(dataset_frap_experiment)
     bleach_frame = dataset_frap_experiment['bleach_frame'][0]       
