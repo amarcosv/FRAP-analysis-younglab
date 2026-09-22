@@ -29,7 +29,7 @@ def import_FRAP_data(cziPath, wcell_corr= False):
 
         roiData, bleach_frame = io_tools.read_zeiss_CSV(cziPath)
         frap_experiment = pd.DataFrame({'bleach_frame':[bleach_frame],'wcell_corr' : [False]})
-        frap_experiment['dt'] = np.mean(np.diff(roiData['timestamp'] [frap_experiment.bleach_frame.item()::]))
+        frap_experiment['dt'] = np.median(np.diff(roiData['timestamp'] [frap_experiment.bleach_frame.item()::]))
         frap_experiment['nframes'] = len(roiData['timestamp'])  
         imageData = []
         regions = []
@@ -136,65 +136,36 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1, output_pa
 
     dataset_frap_experiment = pd.concat(dataset_frap_experiment, ignore_index=True)
     #print(dataset_frap_experiment)
-    bleach_frame = dataset_frap_experiment['bleach_frame'][0]       
-    nframes = dataset_frap_experiment['nframes'][0]
-    dt= np.mean(dataset_frap_experiment['dt'])
+    dt = dataset_frap_experiment['dt'].median()
 
-    # Rebin curves to common timepoints. Uses interpolation!
-    #dataset_roiData = rebin_results(dataset_roiData, dt ,bleach_frame , nframes )
     dataset_roiData = pd.concat(dataset_roiData, ignore_index=True)
-    
-    #Use instead of rebin results if timestamps are very precise and just want to rebin instead of using interpolation
-    dataset_roiData = bin_results(dataset_roiData, dt ,bleach_frame , nframes )
+
+    # Resample each file's recovery curve onto a shared dt-multiple grid (real interpolation)
+    dataset_roiData = rebin_results(dataset_roiData, dt)
 
     #plt.close(fig)
 
     return dataset_roiData, dataset_frap_experiment, fig
 
-#Resample time series to fixed time points 
-def rebin_results(dataset_roiData, dt, frap_frame, n):
+# Resample each file's recovery curve onto a shared dt-multiple grid.
+# Each real timestamp is snapped to its nearest common-dt slot and the value
+# is interpolated there from that file's own real data only, never beyond
+# that file's own recorded range.
+def rebin_results(dataset_roiData, dt):
 
-    end = 0 + (n - 1) * dt
-    timestamps = np.linspace(0, end, n) 
-    timestamps = timestamps-timestamps[frap_frame]
-    print(len(timestamps))
-    
-    rebinned_dataset_roiData = []
+    for file_id, group in dataset_roiData.groupby('file', sort=False):
+        group = group.sort_values('timestamp_frap')
+        t_raw = group['timestamp_frap'].to_numpy(dtype=np.float64)
 
-    for idx,roiData in enumerate(dataset_roiData):
-        rebinned_roiData = pd.DataFrame(columns = ['timestamp','timestamp_frap', 'frap', 'control', 'bkg'])
-        dataset_roiData[idx]['timestamp_frap_r'] = timestamps
-        #dataset_roiData[idx]['frap_norm_r']
-        #b = roiData['frap_norm'].to_numpy(dtype=np.float32)
-        dataset_roiData[idx]['frap_norm_r'] = np.interp(timestamps, roiData['timestamp_frap'].to_numpy(dtype=np.float64), roiData['frap_norm'].to_numpy(dtype=np.float64))
-        dataset_roiData[idx]['frap_fullscale_norm_r'] = np.interp(timestamps, roiData['timestamp_frap'].to_numpy(dtype=np.float64), roiData['frap_fullscale_norm'].to_numpy(dtype=np.float64))
+        snapped_t = np.round(t_raw / dt) * dt
 
+        frap_norm_r = np.interp(snapped_t, t_raw, group['frap_norm'].to_numpy(dtype=np.float64))
+        frap_fullscale_norm_r = np.interp(snapped_t, t_raw, group['frap_fullscale_norm'].to_numpy(dtype=np.float64))
 
-        print(roiData['file'][0])
-  
-    return dataset_roiData
+        dataset_roiData.loc[group.index, 'timestamp_frap_r'] = snapped_t
+        dataset_roiData.loc[group.index, 'frap_norm_r'] = frap_norm_r
+        dataset_roiData.loc[group.index, 'frap_fullscale_norm_r'] = frap_fullscale_norm_r
 
-
-
-
-
-
-
-#Assign timepoints to bins
-def bin_results(dataset_roiData, dt, frap_frame, n):
-
-    timestamps = dataset_roiData.groupby('timepoint')['timestamp_frap'].mean()
-    timepoints_std = dataset_roiData.groupby('timepoint')['timestamp_frap'].std()
-    #dataset_roiData['timestamp_frap_r'] = timestamps
-
-    # Dictionary for mapping
-    idx = np.linspace(0,n-1,n)
-    mapping_dict = pd.Series(timestamps,idx).to_dict()
-    dataset_roiData['timestamp_frap_r'] = dataset_roiData['timepoint'].map(mapping_dict)
-    dataset_roiData['timestamp_frap_res'] = dataset_roiData['timestamp_frap_r'] - dataset_roiData['timestamp_frap_r']
-    dataset_roiData['frap_norm_r'] = dataset_roiData['frap_norm'] 
-    dataset_roiData['frap_fullscale_norm_r'] = dataset_roiData['frap_fullscale_norm'] 
-  
     return dataset_roiData
 
 
