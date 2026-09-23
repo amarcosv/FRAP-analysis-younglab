@@ -47,8 +47,6 @@ def run_FRAP_analysis(roiData, frap_experiment, fitting_exp = 1):
 
     roiData, frap_experiment = processing_tools.photobleaching_corr(roiData, ref_roi , frap_experiment, delay = REF_DELAY,exp=1)
 
-    #roiData, frap_experiment = processing_tools.pre_bleach_normalization(roiData , frap_experiment)
-
     roiData, frap_experiment = processing_tools.run_double_normalization(roiData , frap_experiment)
 
     roiData, frap_experiment = processing_tools.fit_recovery_curve(roiData, frap_experiment, fitting_exp)
@@ -93,10 +91,6 @@ def process_FRAP_folder(folderPath, wcell_corr= True, fitting_exp = 1, output_pa
             roiData,frap_experiment, regions, image,  = import_FRAP_data(os.path.join(folderPath,f), wcell_corr= wcell_corr)
             roiData, frap_experiment = run_FRAP_analysis(roiData, frap_experiment, fitting_exp)
 
-            #if idx==0:
-                #imageData = np.zeros([len(fileList),image.shape[0], image.shape[1]])
-
-            #imageData[idx,:,:] = image
             roiData.insert(loc=0, column = 'file', value = basenames[idx])
             roiData.insert(loc=1, column = 'group', value = group)
             roiData.insert(loc=2, column = 'dish', value = dish)

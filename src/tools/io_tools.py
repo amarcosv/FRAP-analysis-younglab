@@ -7,7 +7,6 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 from io import StringIO
 import numpy as np
-import tools.processing_tools as processing_tools
 import re
 import os
 
@@ -145,8 +144,6 @@ def read_zeiss_CSV(csvPath):
             channel_num = match.group(1)
             region_num = match.group(2)
             
-            # Create a more readable column name.
-            new_col_name = f'Channel {channel_num} Region {region_num} Intensity Mean'
             new_col_name = f'region_{intensity_regions}'
             intensity_regions+=1
             
@@ -233,43 +230,6 @@ def parse_filename(filename):
     print("\tDose = " + dose )
 
     return group, dishN, roi, dose
-
-def parse_filename_old(filename):
-    #DISHXX_PROT_CONDITION_ROI read from folder
-    filename, extension = os.path.splitext(filename)
-
-    prefix = filename.split('Airyscan')
-
-    if "wt" in prefix[0].lower():
-        group = "WT"
-    elif "mut" in prefix[0].lower():
-        group = "MUT"
-    else:
-        group  = "unknown"
-
-    params = re.split('[_-]', prefix[0])
-    #print(params)
-    if len(params)>=3:
-        dishN = params[0].replace("dish", "")
-        prot = (params[1].replace("WT", "")).replace("MUT", "")
-        if "roi" in params[2]:
-            roi = params[2]
-        elif "roi" in params[3]:
-            roi = params[3]
-        else:
-            roi = "null"
-    else:
-        dishN = ""
-        prot = "unknown"
-        roi = ""
-
-    print ("[parse_filename] Metadata retreived from filename: ")
-    print ("\tgroup = " + group)
-    print("\tdish = " + dishN )
-    print("\tProtein = " + prot )
-    print("\tROI  = " + roi )
-
-    return group, dishN, prot, roi
 
 def saveResults(datasetPath, roiData, frap_experiment):
     OUTPUT_FOLDER, foldername = os.path.split(datasetPath)
