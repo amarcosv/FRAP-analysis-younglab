@@ -1,5 +1,5 @@
 #from czitools.metadata_tools.czi_metadata import CziMetadata, get_metadata_as_object,obj2dict
-from czitools.utils import misc
+from czitools.utils import planetable
 from pylibCZIrw import czi as pyczi
 from bioio import BioImage
 import bioio_czi
@@ -77,13 +77,8 @@ def load_image_data(cziPath):
 def load_frame_metadata(cziPath):
     #Command from https://github.com/sebi06/czitools/blob/abae690eb1b3c4ac31054e578243352ee0b106f5/demo/notebooks/read_czi_metadata.ipynb
     # get the planetable for the CZI file
-    pt = misc.get_planetable(cziPath,
-                         norm_time=True,
-                         pt_complete=True,
-                         t=0,
-                         c=0,
-                         z=0)
-    pt.drop(['Subblock', 'T', 'Z', 'C', 'xstart', 'ystart', 'width', 'height', 'Scene'], axis=1, inplace=True)
+    pt, _ = planetable.get_planetable(cziPath, norm_time=True)
+    pt.drop(['Subblock', 'T', 'Z', 'C', 'xstart', 'ystart', 'width', 'height', 'S', 'M'], axis=1, inplace=True, errors='ignore')
     return pt
 
 def read_zeiss_CSV(csvPath):
