@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
+import scipy.stats as stats
 from scipy.optimize import curve_fit, fsolve
+from scikit_posthocs import posthoc_dunn
 from skimage.morphology import disk, remove_small_holes, erosion
 from skimage.filters import threshold_otsu, gaussian, threshold_mean
 from skimage.measure import label
@@ -422,6 +424,81 @@ def fit_recovery_curve(roiData, frap_experiment, exp=1, wfit = 0):
     frap_experiment['mob_corr'] = frap_experiment['mob'] / frap_experiment['gap_ratio']
 
 
-    return roiData , frap_experiment    
+    return roiData , frap_experiment
+
+
+def _run_hypothesis_test(data_g, group_names, metric_name, label):
+    print(f'\nStatistical analysis of {metric_name} {label}:')
+
+    p_val_shapiro = np.zeros(len(group_names))
+    print('\nTest of normality for all groups:')
+    for i, name in enumerate(group_names):
+        stat, p = stats.shapiro(data_g[i])
+        p_val_shapiro[i] = p
+        print(f"[{name}] Shapiro-Wilk Statistic: {stat}, p-value: {p}")
+
+    stat, p_val_levene = stats.levene(*data_g)
+    print('\nTest of equal variance for all groups:')
+    print(f" Levene Statistic: {stat}, p-value: {p_val_levene}")
+
+    if all(p_val_shapiro >= 0.05) and (p_val_levene >= 0.05):
+        print("\nData follow a normal distribution")
+        print("Running ANOVA:")
+        stat, p_val_anova = stats.f_oneway(*data_g)
+        print(f"One way Anova: {stat}, p-value: {p_val_anova}")
+        if len(group_names) > 2:
+            if p_val_anova < 0.05:
+                tukey_df = stats.tukey_hsd(*data_g)
+                print("Running post-hoc tests:")
+                print('Groups compared: ', group_names)
+                print(tukey_df)
+                print(tukey_df.pvalue)
+            else:
+                print("No statistical significance found in ANOVA. No need for post hoc tests")
+    else:
+        print("\nData does not follow a normal distribution. Running non parametric test")
+        print("Running Kruskal-Wallis:")
+        stat, p_val = stats.kruskal(*data_g)
+        print(f"Kruskal-Wallis: {stat}, p-value: {p_val}")
+        if len(group_names) > 2:
+            if p_val < 0.05:
+                p_values_dunn = posthoc_dunn(data_g, p_adjust='bonferroni')
+                print("Running post-hoc tests:")
+                print('Groups compared: ', group_names)
+                print(p_values_dunn)
+            else:
+                print("No statistical significance found in Kruskal-Wallis. No need for post hoc tests")
+
+
+def run_dish_aggregated_comparison(frap_experiment_list, group_names, column, metric_name, min_dishes=3):
+    '''Compare a metric (e.g. 'mob', 'half_max') across groups using one aggregated
+    value per dish, so multiple ROIs from the same dish are not treated as
+    independent replicates.
+
+    If any group has fewer than min_dishes dishes, the dish-aggregated test
+    cannot run reliably (Shapiro-Wilk needs n>=3, and n=3-4 is already
+    marginal). In that case, falls back to a ROI-pooled analysis labeled as
+    exploratory/pseudoreplicated, rather than only reporting descriptive
+    statistics.
+    '''
+    dish_agg = [df.groupby('dish')[column].mean().dropna().to_numpy() for df in frap_experiment_list]
+    n_dishes = [len(g) for g in dish_agg]
+
+    for name, n in zip(group_names, n_dishes):
+        print(f"[{name}] n = {n} dishes")
+
+    if min(n_dishes) < min_dishes:
+        print(f"\nWARNING: at least one group has fewer than {min_dishes} dishes - the "
+              "dish-aggregated test cannot run reliably (Shapiro-Wilk needs n>=3). Falling "
+              "back to the ROI-level analysis below. This result is PSEUDOREPLICATED "
+              "(multiple ROIs per dish counted as independent) and should not be used to "
+              "draw conclusions - treat as a rough, exploratory signal only.")
+        roi_pooled = [df[column].dropna().to_numpy() for df in frap_experiment_list]
+        _run_hypothesis_test(roi_pooled, group_names, metric_name,
+                              label='(EXPLORATORY, ROI-level, pseudoreplicated)')
+        return
+
+    _run_hypothesis_test(dish_agg, group_names, metric_name,
+                          label='(dish-aggregated, n = number of dishes)')
 
 
